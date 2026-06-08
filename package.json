@@ -1,0 +1,41 @@
+{
+    "author": "natekrasner",
+    "dependencies": {},
+    "keywords": [],
+    "name": "wmata-transit",
+    "pebble": {
+        "capabilities": [
+            "location"
+        ],
+        "displayName": "WMATA Transit",
+        "enableMultiJS": true,
+        "messageKeys": [
+            "REQUEST_TYPE",
+            "TARGET_ID",
+            "BEARING",
+            "DISTANCE",
+            "INDEX",
+            "TITLE",
+            "SUBTITLE"
+        ],
+        "projectType": "native",
+        "resources": {
+            "media": []
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "chalk",
+            "diorite",
+            "emery",
+            "gabbro",
+            "flint"
+        ],
+        "uuid": "269a6bba-f270-4588-9e11-7061e3286323",
+        "watchapp": {
+            "watchface": false
+        }
+    },
+    "version": "1.0.0"
+}
