@@ -20,7 +20,10 @@ static MenuLayer *s_menu_layer;
 static StopItem s_stops[MAX_STOPS];
 static int s_num_stops = 0;
 
-// --- LOADING ANIMATION STATE ---
+// --- RESOURCE POINTERS ---
+static GBitmap *s_icon_bus;
+static GBitmap *s_icon_train;
+
 static AppTimer *s_loading_timer;
 static int s_loading_frame = 0;
 
@@ -44,7 +47,7 @@ static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t secti
 }
 
 static int16_t menu_get_cell_height_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context) {
-  if (s_num_stops == 0) return 140; // Full screen for the loader
+  if (s_num_stops == 0) return 140; 
   StopItem *stop = &s_stops[cell_index->row];
   int lines = stop->num_preds > 0 ? stop->num_preds : 1;
   return 40 + (lines * 16); 
@@ -54,7 +57,6 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
   GRect bounds = layer_get_bounds(cell_layer);
   
   if (s_num_stops == 0) {
-    // FULL SCREEN LOADING ANIMATION
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_fill_rect(ctx, bounds, 0, GCornerNone);
     graphics_context_set_text_color(ctx, GColorWhite);
@@ -68,24 +70,34 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
   bool is_bus = (stop->stop_id[0] == 'B');
   bool is_highlighted = menu_cell_layer_is_highlighted(cell_layer);
 
-  // DYNAMIC BACKGROUND COLORS
-  #ifdef PBL_COLOR
-    if (is_bus) {
-      graphics_context_set_fill_color(ctx, is_highlighted ? GColorPictonBlue : GColorDukeBlue);
-    } else {
-      graphics_context_set_fill_color(ctx, is_highlighted ? GColorRajah : GColorWindsorTan);
-    }
-    graphics_fill_rect(ctx, bounds, 0, GCornerNone);
-    graphics_context_set_text_color(ctx, GColorWhite);
-  #else
-    graphics_context_set_text_color(ctx, is_highlighted ? GColorWhite : GColorBlack);
-  #endif
+  // Set the text color depending on if the user is scrolling over the row
+  GColor main_text_color = is_highlighted ? GColorWhite : GColorBlack;
+  GColor dim_text_color = is_highlighted ? GColorLightGray : GColorDarkGray;
 
-  graphics_draw_text(ctx, stop->stop_name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(4, -2, bounds.size.w - 8, 20), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-  graphics_draw_text(ctx, stop->distance, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(4, 18, bounds.size.w - 8, 16), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  // --- DRAW THE ICONS ---
+  GBitmap *target_icon = is_bus ? s_icon_bus : s_icon_train;
+  if (target_icon) {
+    // Set compositing mode so the transparent background of your PNGs works properly
+    graphics_context_set_compositing_mode(ctx, GCompOpSet);
+    
+    // Draw the icon dynamically centered on the left side
+    int icon_y_offset = (bounds.size.h / 2) - 12; // Centers a 24px icon vertically
+    graphics_draw_bitmap_in_rect(ctx, target_icon, GRect(4, icon_y_offset, 24, 24));
+  }
+
+  // --- DRAW THE TEXT (Shifted right by 32 pixels to accommodate the icons) ---
+  int text_x = 32;
+  int text_w = bounds.size.w - 36; // Leave a 4px margin on the right
+
+  graphics_context_set_text_color(ctx, main_text_color);
+  graphics_draw_text(ctx, stop->stop_name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(text_x, -2, text_w, 20), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   
+  graphics_context_set_text_color(ctx, dim_text_color);
+  graphics_draw_text(ctx, stop->distance, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(text_x, 18, text_w, 16), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  
+  graphics_context_set_text_color(ctx, main_text_color);
   for (int i = 0; i < stop->num_preds; i++) {
-    graphics_draw_text(ctx, stop->preds[i], fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(4, 34 + (i * 16), bounds.size.w - 8, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, stop->preds[i], fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(text_x, 34 + (i * 16), text_w, 16), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   }
 }
 
@@ -144,6 +156,10 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 }
 
 static void main_window_load(Window *window) {
+  // LOAD RESOURCES INTO MEMORY
+  s_icon_bus = gbitmap_create_with_resource(RESOURCE_ID_ICON_BUS);
+  s_icon_train = gbitmap_create_with_resource(RESOURCE_ID_ICON_TRAIN);
+
   Layer *window_layer = window_get_root_layer(window); GRect bounds = layer_get_bounds(window_layer);
 
   s_status_bar = status_bar_layer_create();
@@ -154,6 +170,11 @@ static void main_window_load(Window *window) {
 
   s_menu_layer = menu_layer_create(bounds);
   menu_layer_set_callbacks(s_menu_layer, NULL, (MenuLayerCallbacks){ .get_num_rows = menu_get_num_rows_callback, .get_cell_height = menu_get_cell_height_callback, .draw_row = menu_draw_row_callback, .select_click = menu_select_callback });
+  
+  #ifdef PBL_COLOR
+    menu_layer_set_highlight_colors(s_menu_layer, GColorCobaltBlue, GColorWhite);
+  #endif
+  
   menu_layer_set_click_config_onto_window(s_menu_layer, window);
   layer_add_child(window_layer, menu_layer_get_layer(s_menu_layer));
   
@@ -161,7 +182,12 @@ static void main_window_load(Window *window) {
 }
 
 static void main_window_unload(Window *window) {
-  status_bar_layer_destroy(s_status_bar); menu_layer_destroy(s_menu_layer);
+  // DESTROY RESOURCES TO PREVENT MEMORY LEAKS
+  if (s_icon_bus) gbitmap_destroy(s_icon_bus);
+  if (s_icon_train) gbitmap_destroy(s_icon_train);
+  
+  status_bar_layer_destroy(s_status_bar); 
+  menu_layer_destroy(s_menu_layer);
 }
 
 static void init() {
@@ -169,5 +195,6 @@ static void init() {
   window_set_window_handlers(s_main_window, (WindowHandlers) { .load = main_window_load, .unload = main_window_unload });
   app_message_register_inbox_received(inbox_received_callback); window_stack_push(s_main_window, true); app_message_open(1024, 128); 
 }
+
 static void deinit() { window_destroy(s_main_window); }
 int main(void) { init(); app_event_loop(); deinit(); }
