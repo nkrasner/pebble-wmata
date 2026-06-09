@@ -14,60 +14,53 @@ Pebble.addEventListener('appmessage', function(e) {
   var reqType = dict[KEYS.REQUEST_TYPE];
   var targetId = dict[KEYS.TARGET_ID];
 
-  if (reqType === 4) togglePin(targetId);
+  if (reqType === 2) {
+    var parts = targetId.split('|');
+    currentStopId = parts[0];
+    currentRouteId = parts[1];
+    
+    // Find the Stop Name for the Breadcrumb
+    for (var p = 0; p < currentPages.length; p++) {
+      if (currentPages[p].id === currentStopId) { currentStopName = currentPages[p].name; break; }
+    }
+
+    if (currentRouteId === "RAIL_TRAIN") sendUnavailableMessage("Metro Rail", "Live Only - No Schedule");
+    else fetchRouteScheduleAtStop(currentStopId.substring(2), currentRouteId);
+  } 
+  else if (reqType === 3) {
+    currentTripId = targetId;
+    fetchTripDetails(currentRouteId, currentTripId, currentStopId.substring(2));
+  }
+  else if (reqType === 4) togglePin(targetId);
   else if (reqType === 5) movePin(targetId, -1); 
   else if (reqType === 6) movePin(targetId, 1);  
 });
 
-// --- CORE VOWEL/DEDUP ABBREVIATION ---
 function shrinkName(name, maxLen) {
   if (!name || name.length <= maxLen) return name;
-  
   var s = "";
-  for (var i = 0; i < name.length; i++) {
-    if (i === 0 || name[i].toLowerCase() !== name[i-1].toLowerCase()) s += name[i];
-  }
+  for (var i = 0; i < name.length; i++) { if (i === 0 || name[i].toLowerCase() !== name[i-1].toLowerCase()) s += name[i]; }
   if (s.length <= maxLen) return s;
-
-  var vowels = "aeiouAEIOU";
-  var firstV = -1, lastV = -1;
-  for (var j = 0; j < s.length; j++) {
-    if (vowels.indexOf(s[j]) !== -1) {
-      if (firstV === -1) firstV = j;
-      lastV = j;
-    }
-  }
-  
+  var vowels = "aeiouAEIOU"; var firstV = -1, lastV = -1;
+  for (var j = 0; j < s.length; j++) { if (vowels.indexOf(s[j]) !== -1) { if (firstV === -1) firstV = j; lastV = j; } }
   var finalStr = "";
   for (var k = 0; k < s.length; k++) {
-    if (vowels.indexOf(s[k]) !== -1) {
-      if (k === firstV || k === lastV) finalStr += s[k];
-    } else {
-      finalStr += s[k];
-    }
+    if (vowels.indexOf(s[k]) !== -1) { if (k === firstV || k === lastV) finalStr += s[k]; } else { finalStr += s[k]; }
   }
-  
   if (finalStr.length > maxLen) return finalStr.substring(0, maxLen - 2) + "..";
   return finalStr;
 }
 
-// --- PIN MANAGEMENT (ES5 COMPLIANT) ---
 function togglePin(id) {
   var existingIdx = -1;
-  for (var i = 0; i < pinnedStops.length; i++) {
-    if (pinnedStops[i].id === id) { existingIdx = i; break; }
-  }
-
+  for (var i = 0; i < pinnedStops.length; i++) { if (pinnedStops[i].id === id) { existingIdx = i; break; } }
   if (existingIdx >= 0) {
     pinnedStops.splice(existingIdx, 1);
   } else {
     var pageToPin = null;
-    for (var j = 0; j < currentPages.length; j++) {
-      if (currentPages[j].id === id) { pageToPin = currentPages[j]; break; }
-    }
-    if (pageToPin) {
-      pinnedStops.push({ id: pageToPin.id, name: pageToPin.name, type: pageToPin.type, stopIds: pageToPin.stopIds });
-    }
+    for (var j = 0; j < currentPages.length; j++) { if (currentPages[j].id === id) { pageToPin = currentPages[j]; break; } }
+    // ADD TO TOP
+    if (pageToPin) pinnedStops.unshift({ id: pageToPin.id, name: pageToPin.name, type: pageToPin.type, stopIds: pageToPin.stopIds });
   }
   localStorage.setItem('wmata_pins', JSON.stringify(pinnedStops));
   fetchAllPages();
@@ -75,52 +68,49 @@ function togglePin(id) {
 
 function movePin(id, direction) {
   var idx = -1;
-  for (var i = 0; i < pinnedStops.length; i++) {
-    if (pinnedStops[i].id === id) { idx = i; break; }
-  }
+  for (var i = 0; i < pinnedStops.length; i++) { if (pinnedStops[i].id === id) { idx = i; break; } }
   if (idx < 0 || idx + direction < 0 || idx + direction >= pinnedStops.length) return;
-  
-  var temp = pinnedStops[idx];
-  pinnedStops[idx] = pinnedStops[idx + direction];
-  pinnedStops[idx + direction] = temp;
-  
+  var temp = pinnedStops[idx]; pinnedStops[idx] = pinnedStops[idx + direction]; pinnedStops[idx + direction] = temp;
   localStorage.setItem('wmata_pins', JSON.stringify(pinnedStops));
   fetchAllPages();
 }
 
-// --- API QUEUE ---
-var fetchQueue = [];
-var isFetching = false;
+var fetchQueue = []; var isFetching = false;
 function fetchWMATA(url, callback) { fetchQueue.push({url: url, callback: callback}); processFetchQueue(); }
 function processFetchQueue() {
   if (isFetching || fetchQueue.length === 0) return;
-  isFetching = true;
-  var task = fetchQueue.shift();
-  var req = new XMLHttpRequest();
-  req.open('GET', task.url, true);
-  req.setRequestHeader('api_key', '20c44341f61b450d815d3c79e2a593e9');
-  req.onload = function() {
-    var res = {}; if (req.status === 200) { try { res = JSON.parse(req.responseText); } catch(e) {} }
-    task.callback(res); setTimeout(function() { isFetching = false; processFetchQueue(); }, 150); 
-  };
+  isFetching = true; var task = fetchQueue.shift(); var req = new XMLHttpRequest();
+  req.open('GET', task.url, true); req.setRequestHeader('api_key', '20c44341f61b450d815d3c79e2a593e9');
+  req.onload = function() { var res = {}; if (req.status === 200) { try { res = JSON.parse(req.responseText); } catch(e) {} } task.callback(res); setTimeout(function() { isFetching = false; processFetchQueue(); }, 150); };
   req.onerror = function() { task.callback({}); setTimeout(function() { isFetching = false; processFetchQueue(); }, 150); };
   req.send(null);
 }
 
-// --- MASTER DATA BUILDER (ES5 COMPLIANT) ---
+function fetchGroupSchedules(ids, offsetDays, callback) {
+  var results = []; var pending = ids.length;
+  if (pending === 0) return callback([]);
+  ids.forEach(function(id) {
+    fetchWMATA('https://api.wmata.com/Bus.svc/json/jStopSchedule?StopID=' + id + '&Date=' + getLocalDateString(offsetDays) + '&cb=' + Date.now(), function(res) {
+      if (res && res.ScheduleArrivals) results = results.concat(res.ScheduleArrivals);
+      pending--; if (pending === 0) callback(results);
+    });
+  });
+}
+
+function getLocalDateString(offsetDays) {
+  var d = new Date(); d.setDate(d.getDate() + offsetDays);
+  var yyyy = d.getFullYear(); var mm = d.getMonth() + 1; var dd = d.getDate();
+  return yyyy + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+}
+
 function fetchAllPages() {
   navigator.geolocation.getCurrentPosition(function(pos) {
     var lat = pos.coords.latitude; var lon = pos.coords.longitude;
-    var urlBus = 'https://api.wmata.com/Bus.svc/json/jStops?Lat=' + lat + '&Lon=' + lon + '&Radius=800&cb=' + Date.now();
-    var urlRail = 'https://api.wmata.com/Rail.svc/json/jStations';
-    var urlTrains = 'https://api.wmata.com/StationPrediction.svc/json/GetPrediction/All';
-
-    fetchWMATA(urlBus, function(busRes) {
-      fetchWMATA(urlRail, function(railRes) {
-        fetchWMATA(urlTrains, function(trainRes) {
+    fetchWMATA('https://api.wmata.com/Bus.svc/json/jStops?Lat=' + lat + '&Lon=' + lon + '&Radius=800&cb=' + Date.now(), function(busRes) {
+      fetchWMATA('https://api.wmata.com/Rail.svc/json/jStations', function(railRes) {
+        fetchWMATA('https://api.wmata.com/StationPrediction.svc/json/GetPrediction/All', function(trainRes) {
           
           var nearbyStops = [];
-          
           if (busRes.Stops) {
             var groups = {};
             for (var b = 0; b < busRes.Stops.length; b++) {
@@ -130,16 +120,14 @@ function fetchAllPages() {
             }
             for (var key in groups) {
               var g = groups[key];
-              var dist = calculateDistance(lat, lon, g.latSum/g.count, g.lonSum/g.count);
-              nearbyStops.push({ type: 'BUS', id: "B_" + g.ids[0], stopIds: g.ids, name: g.name, dist: dist });
+              nearbyStops.push({ type: 'BUS', id: "B_" + g.ids[0], stopIds: g.ids, name: g.name, dist: calculateDistance(lat, lon, g.latSum/g.count, g.lonSum/g.count) });
             }
           }
 
           if (railRes.Stations) {
             for (var r = 0; r < railRes.Stations.length; r++) {
               var rs = railRes.Stations[r];
-              var rDist = calculateDistance(lat, lon, rs.Lat, rs.Lon);
-              nearbyStops.push({ type: 'RAIL', id: "R_" + rs.Code, stopIds: [rs.Code], name: rs.Name, dist: rDist });
+              nearbyStops.push({ type: 'RAIL', id: "R_" + rs.Code, stopIds: [rs.Code], name: rs.Name, dist: calculateDistance(lat, lon, rs.Lat, rs.Lon) });
             }
           }
 
@@ -149,106 +137,266 @@ function fetchAllPages() {
           var topNearby = [];
           if (railStops.length > 0) topNearby.push(railStops.shift());
           if (railStops.length > 0) topNearby.push(railStops.shift());
-          
           var remainingPool = railStops.concat(busStops).sort(function(a, b) { return a.dist - b.dist; });
           while (topNearby.length < 5 && remainingPool.length > 0) topNearby.push(remainingPool.shift());
           topNearby.sort(function(a, b) { return a.dist - b.dist; });
 
           currentPages = [];
-          
           for (var p = 0; p < pinnedStops.length; p++) {
             var pin = pinnedStops[p];
-            currentPages.push({ id: pin.id, name: pin.name, type: pin.type, stopIds: pin.stopIds, isPinned: true, dist: calculateStopDistance(pin, lat, lon, railRes.Stations, busRes.Stops) });
+            currentPages.push({ id: pin.id, name: pin.name, type: pin.type, stopIds: pin.stopIds, isPinned: true, dist: 99999 });
           }
-
+          // ALLOW DUPLICATES
           for (var n = 0; n < topNearby.length; n++) {
             var nearby = topNearby[n];
-            var found = false;
-            for (var c = 0; c < currentPages.length; c++) {
-              if (currentPages[c].id === nearby.id) { found = true; break; }
-            }
-            if (!found) {
-              nearby.isPinned = false;
-              currentPages.push(nearby);
-            }
+            nearby.isPinned = false;
+            currentPages.push(nearby);
           }
 
-          var payload = {};
-          payload[KEYS.REQUEST_TYPE] = 0;
-          payload[KEYS.INDEX] = -1;
-          payload[KEYS.BEARING] = pinnedStops.length;
-
-          Pebble.sendAppMessage(payload, function() {
-            var allBusIdsArr = [];
-            for (var idx = 0; idx < currentPages.length; idx++) {
-              if (currentPages[idx].type === 'BUS') {
-                allBusIdsArr = allBusIdsArr.concat(currentPages[idx].stopIds);
-              }
-            }
-            var allBusIds = allBusIdsArr.join(',');
-            
-            if (allBusIds.length > 0) {
-               fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + allBusIds + '&cb=' + Date.now(), function(liveBusRes) {
-                 streamPagesToWatch(currentPages, liveBusRes.Predictions || [], trainRes.Trains || [], 0);
-               });
-            } else {
-               streamPagesToWatch(currentPages, [], trainRes.Trains || [], 0);
-            }
-          });
-
+          var payload = {}; payload[KEYS.REQUEST_TYPE] = 0; payload[KEYS.INDEX] = -1; payload[KEYS.BEARING] = pinnedStops.length;
+          Pebble.sendAppMessage(payload, function() { streamPagesToWatch(currentPages, trainRes.Trains || [], 0); });
         });
       });
     });
   }, function(err) { console.log("Loc fail"); }, { timeout: 15000, maximumAge: 30000 });
 }
 
-function calculateStopDistance(page, myLat, myLon, railStats, busStats) {
-    return 99999; 
-}
-
-function streamPagesToWatch(pages, allBuses, allTrains, index) {
+// Per-Page Fetcher to avoid URL Length drops & Fallback to Schedule if Blank!
+function streamPagesToWatch(pages, allTrains, index) {
   if (index >= pages.length || index >= 10) return;
   var page = pages[index];
   var distStr = page.dist > 1320 ? (page.dist / 5280).toFixed(1) + " mi" : (page.dist === 99999 ? "Pinned" : Math.round(page.dist) + " ft");
 
-  var rows = [];
   if (page.type === 'RAIL') {
     var sTrains = [];
-    for (var t1 = 0; t1 < allTrains.length; t1++) {
-      if (page.stopIds.indexOf(allTrains[t1].LocationCode) !== -1) sTrains.push(allTrains[t1]);
-    }
+    for (var t1 = 0; t1 < allTrains.length; t1++) { if (page.stopIds.indexOf(allTrains[t1].LocationCode) !== -1) sTrains.push(allTrains[t1]); }
     sTrains = sTrains.slice(0, 5);
     
+    var rows = [];
     for (var t2 = 0; t2 < sTrains.length; t2++) {
       var tr = sTrains[t2];
-      var tMins = (tr.Min === "ARR" || tr.Min === "BRD" || tr.Min === "---") ? tr.Min : tr.Min;
-      rows.push(tr.Line + "|" + shrinkName(tr.Destination, 14) + "|" + tMins);
+      rows.push(tr.Line + "|" + shrinkName(tr.Destination, 14) + "|" + tr.Min);
     }
-  } else {
-    var sBuses = [];
-    for (var b1 = 0; b1 < allBuses.length; b1++) {
-      if (page.stopIds.indexOf(allBuses[b1].StopID) !== -1) sBuses.push(allBuses[b1]);
+    if (rows.length === 0) rows.push(" |-- NO DATA --|--");
+
+    var dict = {}; dict[KEYS.REQUEST_TYPE] = 0; dict[KEYS.INDEX] = index; dict[KEYS.TARGET_ID] = String(page.id); 
+    dict[KEYS.TITLE] = String(page.name); dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + rows.join("~"));
+    Pebble.sendAppMessage(dict, function() { setTimeout(function() { streamPagesToWatch(pages, allTrains, index + 1); }, 50); });
+  } 
+  else {
+    fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + page.stopIds.join(',') + '&cb=' + Date.now(), function(liveRes) {
+      var preds = liveRes.Predictions || [];
+      if (preds.length > 0) {
+        var rowsLive = [];
+        var sBuses = preds.slice(0, 5);
+        for (var b = 0; b < sBuses.length; b++) {
+          var bs = sBuses[b];
+          var bMins = (bs.Minutes === "0" || bs.Minutes === "ARR") ? "ARR" : bs.Minutes;
+          rowsLive.push(bs.RouteID + "|" + shrinkName(cleanHeadsign(bs.DirectionText), 14) + "|" + bMins);
+        }
+        var dictLive = {}; dictLive[KEYS.REQUEST_TYPE] = 0; dictLive[KEYS.INDEX] = index; dictLive[KEYS.TARGET_ID] = String(page.id); 
+        dictLive[KEYS.TITLE] = String(page.name); dictLive[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + rowsLive.join("~"));
+        Pebble.sendAppMessage(dictLive, function() { setTimeout(function() { streamPagesToWatch(pages, allTrains, index + 1); }, 50); });
+      } else {
+        // FALLBACK TO STATIC SCHEDULE IF NO LIVE BUSES
+        fetchGroupSchedules(page.stopIds, 0, function(schedToday) {
+          fetchGroupSchedules(page.stopIds, 1, function(schedTmrw) {
+            var combined = processTransitData([], schedToday, schedTmrw, []);
+            var rowsStatic = [];
+            for (var c = 0; c < Math.min(combined.length, 5); c++) {
+              rowsStatic.push(combined[c].route + "|" + shrinkName(combined[c].headsign, 14) + "|" + combined[c].displayTime);
+            }
+            if (rowsStatic.length === 0) rowsStatic.push(" |-- NO DATA --|--");
+            
+            var dictStatic = {}; dictStatic[KEYS.REQUEST_TYPE] = 0; dictStatic[KEYS.INDEX] = index; dictStatic[KEYS.TARGET_ID] = String(page.id); 
+            dictStatic[KEYS.TITLE] = String(page.name); dictStatic[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + rowsStatic.join("~"));
+            Pebble.sendAppMessage(dictStatic, function() { setTimeout(function() { streamPagesToWatch(pages, allTrains, index + 1); }, 50); });
+          });
+        });
+      }
+    });
+  }
+}
+
+// --- TIER 3/4 SCHEDULING ENGINE ---
+var currentStopIds = [];
+function fetchRouteScheduleAtStop(primaryId, routeId) {
+  var groupIds = [];
+  for (var p = 0; p < currentPages.length; p++) { if (currentPages[p].id === "B_" + primaryId) { groupIds = currentPages[p].stopIds; break; } }
+  if (groupIds.length === 0) groupIds = [primaryId];
+  currentStopIds = groupIds; 
+
+  fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + groupIds.join(',') + '&cb=' + Date.now(), function(liveRes) {
+    fetchGroupSchedules(groupIds, 0, function(schedToday) {
+      fetchGroupSchedules(groupIds, 1, function(schedTmrw) {
+        var safeRouteId = String(routeId).trim().toUpperCase();
+        var fullList = []; var now = new Date(); var liveTripIds = {}; 
+
+        var livePreds = liveRes.Predictions || [];
+        for (var i = 0; i < livePreds.length; i++) {
+          var lp = livePreds[i];
+          if (lp.RouteID && String(lp.RouteID).trim().toUpperCase() === safeRouteId) {
+            liveTripIds[lp.TripID] = true; 
+            var mins = (lp.Minutes === "0" || lp.Minutes === "ARR") ? 0 : parseInt(lp.Minutes, 10);
+            fullList.push({ rawTime: now.getTime() + (mins * 60000), displayTime: formatTime(lp.Minutes) + " (Live)", tripId: lp.TripID || safeRouteId, dirText: lp.DirectionText });
+          }
+        }
+
+        var allSched = (schedToday || []).concat(schedTmrw || []);
+        for (var j = 0; j < allSched.length; j++) {
+          var s = allSched[j];
+          if (s.RouteID && String(s.RouteID).trim().toUpperCase() === safeRouteId) {
+            if (liveTripIds[s.TripID]) continue; 
+            var schedTime = new Date(s.ScheduleTime.replace('T', ' ').replace(/-/g, '/'));
+            var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
+            var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
+            var isTomorrow = schedTime.getDate() !== now.getDate();
+            var dirChar = s.TripDirectionText ? " " + s.TripDirectionText.charAt(0).toUpperCase() : "";
+            fullList.push({ rawTime: schedTime.getTime(), displayTime: (isTomorrow ? "Tmrw " : "") + hours + ":" + cleanMins + ampm + dirChar, tripId: s.TripID || safeRouteId });
+          }
+        }
+
+        fullList.sort(function(a, b) { return a.rawTime - b.rawTime; });
+        if (fullList.length === 0) fullList.push({ displayTime: "No Schedule Data", rawTime: now.getTime(), tripId: safeRouteId });
+
+        var nextIndex = 0;
+        for (var k = 0; k < fullList.length; k++) { if (fullList[k].rawTime >= now.getTime()) { nextIndex = k; break; } }
+
+        var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 2; headerDict[KEYS.INDEX] = -1;
+        var shortName = currentStopName.length > 15 ? currentStopName.substring(0, 15) + "..." : currentStopName;
+        headerDict[KEYS.TITLE] = String(safeRouteId + " @ " + shortName); 
+        headerDict[KEYS.BEARING] = nextIndex; 
+        
+        Pebble.sendAppMessage(headerDict, function() { sendScheduleRows(fullList, 0); });
+      });
+    });
+  });
+}
+
+function sendScheduleRows(preds, index) {
+  if (index >= preds.length || index >= 80) return; 
+  var p = preds[index];
+  var dict = {}; dict[KEYS.REQUEST_TYPE] = 2; dict[KEYS.INDEX] = index; dict[KEYS.TARGET_ID] = String(p.tripId); dict[KEYS.SUBTITLE] = String(p.displayTime);
+  Pebble.sendAppMessage(dict, function() { setTimeout(function() { sendScheduleRows(preds, index + 1); }, 50); }, function() { setTimeout(function() { sendScheduleRows(preds, index); }, 200); });
+}
+
+function fetchTripDetails(routeId, tripId, primaryId) {
+  var urlSchedToday = 'https://api.wmata.com/Bus.svc/json/jRouteSchedule?RouteID=' + routeId + '&Date=' + getLocalDateString(0) + '&cb=' + Date.now();
+  fetchWMATA(urlSchedToday, function(schedToday) {
+    if (findAndSendTrip(schedToday, tripId, primaryId, routeId)) return; 
+    var urlSchedTmrw = 'https://api.wmata.com/Bus.svc/json/jRouteSchedule?RouteID=' + routeId + '&Date=' + getLocalDateString(1) + '&cb=' + Date.now();
+    fetchWMATA(urlSchedTmrw, function(schedTmrw) {
+      if (!findAndSendTrip(schedTmrw, tripId, primaryId, routeId)) sendUnavailableMessage(routeId, "No Trip Data");
+    });
+  });
+}
+
+function findAndSendTrip(schedObj, tripId, primaryId, routeId) {
+  var dirs = [];
+  if (schedObj.Direction0) dirs.push(schedObj.Direction0);
+  if (schedObj.Direction1) dirs.push(schedObj.Direction1);
+  var targetTrip = null; var headsign = "Trip Details"; var exactMatch = true;
+  var groupIds = currentStopIds.length > 0 ? currentStopIds : [primaryId];
+  for (var d = 0; d < dirs.length; d++) {
+    var trips = dirs[d].Trips || [];
+    for (var t = 0; t < trips.length; t++) {
+      if (String(trips[t].TripID).trim() === String(tripId).trim()) { targetTrip = trips[t]; headsign = cleanHeadsign(dirs[d].TripHeadsign || trips[t].TripDirectionText); break; }
     }
-    sBuses = sBuses.slice(0, 5);
-    
-    for (var b2 = 0; b2 < sBuses.length; b2++) {
-      var bs = sBuses[b2];
-      var bMins = (bs.Minutes === "0" || bs.Minutes === "ARR") ? "ARR" : bs.Minutes;
-      var headsign = shrinkName(cleanHeadsign(bs.DirectionText), 14);
-      rows.push(bs.RouteID + "|" + headsign + "|" + bMins);
+    if (targetTrip) break;
+  }
+  if (!targetTrip) {
+    exactMatch = false; 
+    for (var d2 = 0; d2 < dirs.length; d2++) {
+      var trips2 = dirs[d2].Trips || [];
+      for (var t2 = 0; t2 < trips2.length; t2++) {
+        var st = trips2[t2].StopTimes || [];
+        for (var s = 0; s < st.length; s++) {
+          if (groupIds.indexOf(String(st[s].StopID).trim()) !== -1) { targetTrip = trips2[t2]; headsign = cleanHeadsign(dirs[d2].TripHeadsign || trips2[t2].TripDirectionText) + " (Route)"; break; }
+        }
+        if (targetTrip) break;
+      }
+      if (targetTrip) break;
     }
   }
-  if (rows.length === 0) rows.push(" |-- NO DATA --|--");
+  if (!targetTrip) return false; 
+  var tripStops = []; var snapIndex = 0;
+  if (targetTrip.StopTimes) {
+    for (var i = 0; i < targetTrip.StopTimes.length; i++) {
+      var stop = targetTrip.StopTimes[i];
+      if (groupIds.indexOf(String(stop.StopID).trim()) !== -1) snapIndex = i;
+      var displayStr = "--";
+      if (exactMatch) { 
+        var schedTime = new Date(stop.Time.replace('T', ' ').replace(/-/g, '/'));
+        var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
+        var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
+        displayStr = hours + ":" + cleanMins + ampm;
+      }
+      tripStops.push({ stopName: stop.StopName, displayTime: displayStr });
+    }
+  }
+  var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 3; headerDict[KEYS.INDEX] = -1;
+  headerDict[KEYS.TITLE] = String(routeId + " • " + headsign); headerDict[KEYS.BEARING] = snapIndex;
+  Pebble.sendAppMessage(headerDict, function() { sendTripRows(tripStops, 0); });
+  return true; 
+}
 
-  var dict = {}; 
-  dict[KEYS.REQUEST_TYPE] = 0; 
-  dict[KEYS.INDEX] = index; 
-  dict[KEYS.TARGET_ID] = String(page.id); 
-  dict[KEYS.TITLE] = String(page.name); 
-  dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + rows.join("~"));
-  
-  Pebble.sendAppMessage(dict, function() { setTimeout(function() { streamPagesToWatch(pages, allBuses, allTrains, index + 1); }, 50); });
+function sendTripRows(stops, index) {
+  if (index >= stops.length || index >= 80) return; 
+  var st = stops[index];
+  var dict = {}; dict[KEYS.REQUEST_TYPE] = 3; dict[KEYS.INDEX] = index;
+  dict[KEYS.TITLE] = String(st.stopName); dict[KEYS.SUBTITLE] = String(st.displayTime);
+  Pebble.sendAppMessage(dict, function() { setTimeout(function() { sendTripRows(stops, index + 1); }, 50); }, function() { setTimeout(function() { sendTripRows(stops, index); }, 200); });
+}
+
+function sendUnavailableMessage(routeId, message) {
+  var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 3; headerDict[KEYS.INDEX] = -1;
+  headerDict[KEYS.TITLE] = String(routeId + " • " + message); headerDict[KEYS.BEARING] = 0;
+  Pebble.sendAppMessage(headerDict, function() { 
+    var dict = {}; dict[KEYS.REQUEST_TYPE] = 3; dict[KEYS.INDEX] = 0;
+    dict[KEYS.TITLE] = String("WMATA API Offline"); dict[KEYS.SUBTITLE] = String("--");
+    Pebble.sendAppMessage(dict); 
+  });
+}
+
+function processTransitData(livePreds, schedToday, schedTmrw, supportedRoutes) {
+  livePreds = livePreds || []; schedToday = schedToday || []; schedTmrw = schedTmrw || []; supportedRoutes = supportedRoutes || [];
+  var allSched = schedToday.concat(schedTmrw);
+  var combined = []; var seenRoutes = {}; var pushedRoutes = {}; var now = new Date();
+
+  for (var i = 0; i < livePreds.length; i++) {
+    var p = livePreds[i]; var headsign = cleanHeadsign(p.DirectionText);
+    var normKey = String(p.RouteID + headsign).toUpperCase().replace(/\s+/g, '');
+    if (!seenRoutes[normKey]) {
+      seenRoutes[normKey] = true; pushedRoutes[String(p.RouteID).trim()] = true; 
+      var mins = (p.Minutes === "0" || p.Minutes === "ARR") ? 0 : parseInt(p.Minutes, 10);
+      combined.push({ route: p.RouteID, headsign: headsign, minutes: mins, displayTime: formatTime(p.Minutes), tripId: p.TripID || p.RouteID });
+    }
+  }
+
+  for (var j = 0; j < allSched.length; j++) {
+    var sch = allSched[j];
+    if (!sch.RouteID) continue; 
+    var schedTime = new Date(sch.ScheduleTime.replace('T', ' ').replace(/-/g, '/'));
+    if (schedTime > now) {
+      var headsignSched = cleanHeadsign(sch.TripDirectionText);
+      var normKeySched = String(sch.RouteID + headsignSched).toUpperCase().replace(/\s+/g, '');
+      if (!seenRoutes[normKeySched]) {
+        seenRoutes[normKeySched] = true; pushedRoutes[String(sch.RouteID).trim()] = true;
+        var diffMs = schedTime - now; var diffMins = Math.floor(diffMs / 60000); var displayStr = "";
+        
+        if (diffMins > 120) {
+          var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12; 
+          var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
+          var isTomorrow = schedTime.getDate() !== now.getDate();
+          displayStr = (isTomorrow ? "Tmrw " : "") + hours + ":" + cleanMins + ampm;
+        } else { displayStr = diffMins + "m (Sch)"; }
+        combined.push({ route: sch.RouteID, headsign: headsignSched, minutes: diffMins, displayTime: displayStr, tripId: sch.TripID || sch.RouteID });
+      }
+    }
+  }
+  combined.sort(function(a, b) { return a.minutes - b.minutes; }); return combined;
 }
 
 function cleanHeadsign(text) { if (!text) return "Unknown"; var idx = text.toLowerCase().indexOf(" to "); return idx !== -1 ? text.substring(idx + 4) : text; }
+function formatTime(mins) { return (mins === "0" || mins === "ARR") ? "ARR" : mins + " min"; }
 function calculateDistance(lat1, lon1, lat2, lon2) { var R = 20925640; var dLat = (lat2 - lat1) * Math.PI / 180; var dLon = (lon2 - lon1) * Math.PI / 180; var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2); var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); return R * c; }
