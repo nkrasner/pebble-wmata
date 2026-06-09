@@ -75,15 +75,21 @@ function movePin(id, direction) {
   fetchAllPages();
 }
 
-var fetchQueue = []; var isFetching = false;
+var fetchQueue = [];
+var LOCK_DURATION_MS = 100;
+var lockReleaseAt = 0;
 function fetchWMATA(url, callback) { fetchQueue.push({url: url, callback: callback}); processFetchQueue(); }
 function processFetchQueue() {
-  if (isFetching || fetchQueue.length === 0) return;
-  isFetching = true; var task = fetchQueue.shift(); var req = new XMLHttpRequest();
+  if (fetchQueue.length === 0) return;
+  var now = Date.now();
+  if (now < lockReleaseAt) { setTimeout(processFetchQueue, lockReleaseAt - now); return; }
+  lockReleaseAt = now + LOCK_DURATION_MS;
+  var task = fetchQueue.shift(); var req = new XMLHttpRequest();
   req.open('GET', task.url, true); req.setRequestHeader('api_key', '20c44341f61b450d815d3c79e2a593e9');
-  req.onload = function() { var res = {}; if (req.status === 200) { try { res = JSON.parse(req.responseText); } catch(e) {} } task.callback(res); setTimeout(function() { isFetching = false; processFetchQueue(); }, 150); };
-  req.onerror = function() { task.callback({}); setTimeout(function() { isFetching = false; processFetchQueue(); }, 150); };
+  req.onload = function() { var res = {}; if (req.status === 200) { try { res = JSON.parse(req.responseText); } catch(e) {} } task.callback(res); processFetchQueue(); };
+  req.onerror = function() { task.callback({}); processFetchQueue(); };
   req.send(null);
+  processFetchQueue();
 }
 
 function fetchGroupSchedules(ids, offsetDays, callback) {
