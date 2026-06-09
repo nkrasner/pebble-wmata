@@ -131,6 +131,14 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
     #ifdef PBL_COLOR
       graphics_context_set_fill_color(ctx, get_route_color(row->route));
       graphics_fill_rect(ctx, GRect(4, y_offset, 32, 22), 4, GCornersAll);
+      graphics_context_set_stroke_color(ctx, GColorWhite);
+      graphics_context_set_stroke_width(ctx, 1);
+      graphics_draw_round_rect(ctx, GRect(5, y_offset + 1, 30, 20), 3);
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(3, y_offset,     32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(5, y_offset,     31, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(3, y_offset + 2, 32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(5, y_offset + 2, 31, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
       graphics_context_set_text_color(ctx, GColorWhite);
     #else
       graphics_context_set_text_color(ctx, GColorBlack);
