@@ -112,7 +112,18 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
   int y_offset = 50;
   for (int i = 0; i < p->num_rows; i++) {
     TransitRow *row = &p->rows[i];
-    
+
+    if (row->route[0] == '.') {
+      #ifdef PBL_COLOR
+        graphics_context_set_fill_color(ctx, GColorLightGray);
+      #else
+        graphics_context_set_fill_color(ctx, GColorDarkGray);
+      #endif
+      graphics_fill_rect(ctx, GRect(4, y_offset, bounds.size.w - 8, 18), 4, GCornersAll);
+      y_offset += 24;
+      continue;
+    }
+
     #ifdef PBL_COLOR
       graphics_context_set_fill_color(ctx, get_route_color(row->route));
       graphics_fill_rect(ctx, GRect(4, y_offset, 32, 22), 4, GCornersAll);
@@ -191,7 +202,7 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
 
   // 2. Dynamic Schedule Buttons
   for (int r = 0; r < p->num_rows; r++) {
-    if (strlen(p->rows[r].route) == 0 || p->rows[r].route[0] == ' ') continue; // Skip blank/empty rows
+    if (strlen(p->rows[r].route) == 0 || p->rows[r].route[0] == ' ' || p->rows[r].route[0] == '.') continue; // Skip blank/empty/sentinel rows
     
     // Prevent listing duplicate routes (e.g. if Northbound and Southbound are both listed)
     bool is_duplicate = false;
