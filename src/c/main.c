@@ -87,7 +87,11 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
   TransitPage *p = &s_pages[s_current_page];
 
   // 1. Top Bar
-  graphics_context_set_fill_color(ctx, GColorBlack);
+  #ifdef PBL_COLOR
+    graphics_context_set_fill_color(ctx, p->is_pinned ? GColorChromeYellow : GColorBlack);
+  #else
+    graphics_context_set_fill_color(ctx, GColorBlack);
+  #endif
   graphics_fill_rect(ctx, GRect(0, 0, bounds.size.w, 20), 0, GCornerNone);
   
   char time_str[16];
