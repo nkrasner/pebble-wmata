@@ -23,13 +23,13 @@
             "media": [
                 {
                     "file": "images/bus.bmp",
-                    "name": "RESOURCE_ID_ICON_BUS",
+                    "name": "ICON_BUS",
                     "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
                     "file": "images/train.png",
-                    "name": "RESOURCE_ID_ICON_TRAIN",
+                    "name": "ICON_TRAIN",
                     "targetPlatforms": null,
                     "type": "bitmap"
                 }
