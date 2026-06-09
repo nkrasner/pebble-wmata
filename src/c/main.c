@@ -232,7 +232,11 @@ static int32_t safe_get_int(Tuple *t) {
 static char s_raw_data_buffer[512]; 
 
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
-  Tuple *type_t = dict_find(iterator, 0); if (!type_t || safe_get_int(type_t) != 0) return;
+  Tuple *type_t = dict_find(iterator, 0); if (!type_t) return;
+  int msg_type = safe_get_int(type_t);
+  if (msg_type == 2) { schedule_window_handle_inbox(iterator); return; }
+  if (msg_type == 3) { trip_window_handle_inbox(iterator); return; }
+  if (msg_type != 0) return;
   Tuple *idx_t = dict_find(iterator, 4); if (!idx_t) return;
   int index = safe_get_int(idx_t);
 
