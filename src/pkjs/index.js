@@ -148,8 +148,7 @@ function streamPageData(pages, allTrains, fillOrder) {
     if (rows.length === 0) rows.push(" |-- NO DATA --|--");
     sendPage(rows);
   } else {
-    fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + page.stopIds.join(',') + '&cb=' + Date.now(), function(liveRes) {
-      var preds = liveRes.Predictions || [];
+    fetchPredictionsForGroup(page.stopIds, function(preds) {
       if (preds.length > 0) {
         var rows = [];
         var sBuses = preds.slice(0, 5);
@@ -183,6 +182,17 @@ function fetchGroupSchedules(ids, offsetDays, callback) {
     fetchWMATA('https://api.wmata.com/Bus.svc/json/jStopSchedule?StopID=' + id + '&Date=' + getLocalDateString(offsetDays) + '&cb=' + Date.now(), function(res) {
       if (res && res.ScheduleArrivals) results = results.concat(res.ScheduleArrivals);
       pending--; if (pending === 0) callback(results);
+    });
+  });
+}
+
+function fetchPredictionsForGroup(stopIds, callback) {
+  var all = []; var pending = stopIds.length;
+  if (pending === 0) { callback([]); return; }
+  stopIds.forEach(function(id) {
+    fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + id + '&cb=' + Date.now(), function(res) {
+      if (res && res.Predictions) all = all.concat(res.Predictions);
+      pending--; if (pending === 0) callback(all);
     });
   });
 }
@@ -263,13 +273,11 @@ function fetchRouteScheduleAtStop(primaryId, routeId) {
   if (groupIds.length === 0) groupIds = [primaryId];
   currentStopIds = groupIds; 
 
-  fetchWMATA('https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=' + groupIds.join(',') + '&cb=' + Date.now(), function(liveRes) {
+  fetchPredictionsForGroup(groupIds, function(livePreds) {
     fetchGroupSchedules(groupIds, 0, function(schedToday) {
       fetchGroupSchedules(groupIds, 1, function(schedTmrw) {
         var safeRouteId = String(routeId).trim().toUpperCase();
-        var fullList = []; var now = new Date(); var liveTripIds = {}; 
-
-        var livePreds = liveRes.Predictions || [];
+        var fullList = []; var now = new Date(); var liveTripIds = {};
         for (var i = 0; i < livePreds.length; i++) {
           var lp = livePreds[i];
           if (lp.RouteID && String(lp.RouteID).trim().toUpperCase() === safeRouteId) {
