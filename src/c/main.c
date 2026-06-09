@@ -43,6 +43,12 @@ static char s_action_route[10][16];
 static AppTimer *s_loading_timer = NULL;
 static int s_loading_frame = 0;
 
+static TransitPage s_outgoing_page;
+static Layer *s_outgoing_layer = NULL;
+static PropertyAnimation *s_anim_in = NULL;
+static PropertyAnimation *s_anim_out = NULL;
+static bool s_animating = false;
+
 static void loading_timer_callback(void *data) {
   s_loading_frame = (s_loading_frame + 1) % 4;
   if (s_num_pages == 0 && s_page_layer) {
@@ -69,22 +75,10 @@ static GColor get_route_color(const char* route_id) {
   return (GColor){ .argb = (uint8_t)(0xC0 | (r << 4) | (g << 2) | b) };
 }
 
-static void page_update_proc(Layer *layer, GContext *ctx) {
+static void render_transit_page(Layer *layer, GContext *ctx, TransitPage *p) {
   GRect bounds = layer_get_bounds(layer);
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
-
-  if (s_num_pages == 0) {
-    graphics_context_set_text_color(ctx, GColorBlack);
-    const char* frames[] = {"Scanning Area", "Scanning Area.", "Scanning Area..", "Scanning Area..."};
-    graphics_draw_text(ctx, frames[s_loading_frame], fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), GRect(0, 60, bounds.size.w, 30), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    return;
-  }
-
-  if (s_current_page >= s_num_pages) s_current_page = s_num_pages - 1;
-  if (s_current_page < 0) s_current_page = 0;
-  
-  TransitPage *p = &s_pages[s_current_page];
 
   // 1. Top Bar
   #ifdef PBL_COLOR
@@ -93,12 +87,12 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, GColorBlack);
   #endif
   graphics_fill_rect(ctx, GRect(0, 0, bounds.size.w, 20), 0, GCornerNone);
-  
+
   char time_str[16];
   clock_copy_time_string(time_str, sizeof(time_str));
   graphics_context_set_text_color(ctx, GColorWhite);
   graphics_draw_text(ctx, time_str, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(4, 0, 50, 20), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-  
+
   graphics_context_set_text_color(ctx, p->is_pinned ? GColorYellow : GColorWhite);
   graphics_draw_text(ctx, p->dist, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(bounds.size.w - 64, 0, 60, 20), GTextOverflowModeFill, GTextAlignmentRight, NULL);
 
@@ -108,7 +102,7 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_compositing_mode(ctx, GCompOpSet);
     graphics_draw_bitmap_in_rect(ctx, target_icon, GRect(4, 22, 24, 24));
   }
-  
+
   graphics_context_set_text_color(ctx, GColorBlack);
   graphics_draw_text(ctx, p->name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(32, 22, bounds.size.w - 36, 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
@@ -145,23 +139,91 @@ static void page_update_proc(Layer *layer, GContext *ctx) {
     #endif
 
     graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(4, y_offset + 1, 32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    
+
     graphics_context_set_text_color(ctx, GColorBlack);
     graphics_draw_text(ctx, row->dest, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(40, y_offset - 2, bounds.size.w - 84, 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-    
-    // Shifted time text slightly left to prevent clipping the fallback "(Sch)" text
+
     graphics_draw_text(ctx, row->time, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(bounds.size.w - 44, y_offset + 1, 40, 24), GTextOverflowModeFill, GTextAlignmentRight, NULL);
-    
+
     y_offset += 24;
   }
 }
 
+static void page_update_proc(Layer *layer, GContext *ctx) {
+  if (s_num_pages == 0) {
+    GRect bounds = layer_get_bounds(layer);
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+    graphics_context_set_text_color(ctx, GColorBlack);
+    const char* frames[] = {"Scanning Area", "Scanning Area.", "Scanning Area..", "Scanning Area..."};
+    graphics_draw_text(ctx, frames[s_loading_frame], fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), GRect(0, 60, bounds.size.w, 30), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    return;
+  }
+  if (s_current_page >= s_num_pages) s_current_page = s_num_pages - 1;
+  if (s_current_page < 0) s_current_page = 0;
+  render_transit_page(layer, ctx, &s_pages[s_current_page]);
+}
+
+static void outgoing_update_proc(Layer *layer, GContext *ctx) {
+  render_transit_page(layer, ctx, &s_outgoing_page);
+}
+
+static void animation_stopped(Animation *anim, bool finished, void *context) {
+  s_animating = false;
+  if (s_outgoing_layer) layer_set_hidden(s_outgoing_layer, true);
+  if (s_anim_in)  { property_animation_destroy(s_anim_in);  s_anim_in  = NULL; }
+  if (s_anim_out) { property_animation_destroy(s_anim_out); s_anim_out = NULL; }
+}
+
+static void start_page_transition(int direction) {
+  if (s_animating || s_num_pages == 0) return;
+  if (direction > 0 && s_current_page >= s_num_pages - 1) return;
+  if (direction < 0 && s_current_page <= 0) return;
+
+  GRect bounds = layer_get_bounds(s_page_layer);
+  int w = bounds.size.w;
+  int h = bounds.size.h;
+
+  s_outgoing_page = s_pages[s_current_page];
+  s_current_page += direction;
+  s_animating = true;
+
+  layer_set_hidden(s_outgoing_layer, false);
+  layer_mark_dirty(s_outgoing_layer);
+  layer_mark_dirty(s_page_layer);
+
+  GRect out_start = GRect(0, 0, w, h);
+  GRect out_end   = GRect(0, direction > 0 ? -h : h, w, h);
+  GRect in_start  = GRect(0, direction > 0 ?  h : -h, w, h);
+  GRect in_end    = GRect(0, 0, w, h);
+
+  layer_set_frame(s_outgoing_layer, out_start);
+  layer_set_frame(s_page_layer, in_start);
+
+  s_anim_out = property_animation_create_layer_frame(s_outgoing_layer, &out_start, &out_end);
+  s_anim_in  = property_animation_create_layer_frame(s_page_layer,     &in_start,  &in_end);
+
+  animation_set_duration(property_animation_get_animation(s_anim_out), 200);
+  animation_set_duration(property_animation_get_animation(s_anim_in),  200);
+  animation_set_curve(property_animation_get_animation(s_anim_out), AnimationCurveEaseInOut);
+  animation_set_curve(property_animation_get_animation(s_anim_in),  AnimationCurveEaseInOut);
+
+  AnimationHandlers handlers = { .stopped = animation_stopped };
+  animation_set_handlers(property_animation_get_animation(s_anim_in),  handlers, NULL);
+  animation_set_handlers(property_animation_get_animation(s_anim_out), handlers, NULL);
+
+  animation_schedule(property_animation_get_animation(s_anim_out));
+  animation_schedule(property_animation_get_animation(s_anim_in));
+}
+
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_current_page > 0) { s_current_page--; layer_mark_dirty(s_page_layer); }
+  if (s_animating || s_num_pages == 0 || s_current_page <= 0) return;
+  start_page_transition(-1);
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_current_page < s_num_pages - 1) { s_current_page++; layer_mark_dirty(s_page_layer); }
+  if (s_animating || s_num_pages == 0 || s_current_page >= s_num_pages - 1) return;
+  start_page_transition(1);
 }
 
 // --- NEW ROUTED ACTION MENU ---
@@ -326,19 +388,30 @@ static void main_window_load(Window *window) {
   s_icon_bus = gbitmap_create_with_resource(RESOURCE_ID_ICON_BUS);
   s_icon_train = gbitmap_create_with_resource(RESOURCE_ID_ICON_TRAIN);
 
-  Layer *window_layer = window_get_root_layer(window); GRect bounds = layer_get_bounds(window_layer);
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  s_outgoing_layer = layer_create(bounds);
+  layer_set_update_proc(s_outgoing_layer, outgoing_update_proc);
+  layer_add_child(window_layer, s_outgoing_layer);
+  layer_set_hidden(s_outgoing_layer, true);
+
   s_page_layer = layer_create(bounds);
   layer_set_update_proc(s_page_layer, page_update_proc);
   layer_add_child(window_layer, s_page_layer);
-  
+
   window_set_click_config_provider(window, click_config_provider);
   s_loading_timer = app_timer_register(300, loading_timer_callback, NULL);
 }
 
 static void main_window_unload(Window *window) {
   if (s_loading_timer) app_timer_cancel(s_loading_timer);
-  if (s_icon_bus) gbitmap_destroy(s_icon_bus); 
+  if (s_anim_in)  { animation_unschedule(property_animation_get_animation(s_anim_in));  property_animation_destroy(s_anim_in);  s_anim_in  = NULL; }
+  if (s_anim_out) { animation_unschedule(property_animation_get_animation(s_anim_out)); property_animation_destroy(s_anim_out); s_anim_out = NULL; }
+  s_animating = false;
+  if (s_icon_bus)   gbitmap_destroy(s_icon_bus);
   if (s_icon_train) gbitmap_destroy(s_icon_train);
+  if (s_outgoing_layer) { layer_destroy(s_outgoing_layer); s_outgoing_layer = NULL; }
   layer_destroy(s_page_layer);
 }
 
