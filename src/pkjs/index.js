@@ -150,6 +150,11 @@ function streamPageData(pages, allTrains, fillOrder) {
   } else {
     fetchPredictionsForGroup(page.stopIds, function(preds) {
       if (preds.length > 0) {
+        preds.sort(function(a, b) {
+          var aMin = (a.Minutes === "0" || a.Minutes === "ARR") ? 0 : parseInt(a.Minutes, 10);
+          var bMin = (b.Minutes === "0" || b.Minutes === "ARR") ? 0 : parseInt(b.Minutes, 10);
+          return aMin - bMin;
+        });
         var rows = [];
         var sBuses = preds.slice(0, 5);
         for (var b = 0; b < sBuses.length; b++) {
