@@ -90,10 +90,18 @@ static void render_transit_page(Layer *layer, GContext *ctx, TransitPage *p) {
 
   char time_str[16];
   clock_copy_time_string(time_str, sizeof(time_str));
-  graphics_context_set_text_color(ctx, GColorWhite);
+  #ifdef PBL_COLOR
+    graphics_context_set_text_color(ctx, p->is_pinned ? GColorBlack : GColorWhite);
+  #else
+    graphics_context_set_text_color(ctx, GColorWhite);
+  #endif
   graphics_draw_text(ctx, time_str, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(4, 0, 50, 20), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
 
-  graphics_context_set_text_color(ctx, p->is_pinned ? GColorYellow : GColorWhite);
+  #ifdef PBL_COLOR
+    graphics_context_set_text_color(ctx, p->is_pinned ? GColorBlack : GColorWhite);
+  #else
+    graphics_context_set_text_color(ctx, p->is_pinned ? GColorYellow : GColorWhite);
+  #endif
   graphics_draw_text(ctx, p->dist, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(bounds.size.w - 64, 0, 60, 20), GTextOverflowModeFill, GTextAlignmentRight, NULL);
 
   // 2. Stop Header
@@ -209,8 +217,7 @@ static void start_page_transition(int direction) {
   animation_set_curve(property_animation_get_animation(s_anim_in),  AnimationCurveEaseInOut);
 
   AnimationHandlers handlers = { .stopped = animation_stopped };
-  animation_set_handlers(property_animation_get_animation(s_anim_in),  handlers, NULL);
-  animation_set_handlers(property_animation_get_animation(s_anim_out), handlers, NULL);
+  animation_set_handlers(property_animation_get_animation(s_anim_in), handlers, NULL);
 
   animation_schedule(property_animation_get_animation(s_anim_out));
   animation_schedule(property_animation_get_animation(s_anim_in));
