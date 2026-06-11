@@ -133,9 +133,6 @@ static void render_transit_page(Layer *layer, GContext *ctx, TransitPage *p) {
     #ifdef PBL_COLOR
       graphics_context_set_fill_color(ctx, get_route_color(row->route));
       graphics_fill_rect(ctx, GRect(4, y_offset, 32, 22), 4, GCornersAll);
-      graphics_context_set_stroke_color(ctx, GColorWhite);
-      graphics_context_set_stroke_width(ctx, 1);
-      graphics_draw_round_rect(ctx, GRect(5, y_offset + 1, 30, 20), 3);
     #endif
 
     graphics_context_set_text_color(ctx, GColorBlack);
