@@ -185,6 +185,7 @@ function streamPageData(pages, allTrains, fillOrder) {
 // from the OneBusAway API behind busETA (buseta.wmata.com). OBA uses internal stop
 // IDs, so WMATA stop codes are resolved once via busETA search and cached.
 var OBA_API = 'https://buseta.wmata.com/onebusaway-api-webapp/api/where/';
+var OBA_KEY = 'TEST'; // OBA default test key; swap if WMATA issues a real one
 var obaIdCache = JSON.parse(localStorage.getItem('oba_stop_ids')) || {};
 
 function resolveObaStopId(code, callback) {
@@ -213,7 +214,7 @@ function fetchGroupSchedules(ids, offsetDays, callback) {
   ids.forEach(function(id) {
     resolveObaStopId(id, function(obaId) {
       if (!obaId) { pending--; if (pending === 0) callback(results); return; }
-      fetchWMATA(OBA_API + 'schedule-for-stop/' + obaId + '.json?key=TEST&date=' + getLocalDateString(offsetDays), function(res) {
+      fetchWMATA(OBA_API + 'schedule-for-stop/' + obaId + '.json?key=' + OBA_KEY + '&date=' + getLocalDateString(offsetDays), function(res) {
         var schedules = (res.data && res.data.entry && res.data.entry.stopRouteSchedules) || [];
         for (var r = 0; r < schedules.length; r++) {
           var routeId = String(schedules[r].routeId).replace(/^\d+_/, '');
@@ -379,7 +380,7 @@ function sendScheduleRows(preds, index) {
 }
 
 function fetchTripDetails(routeId, tripId, primaryId) {
-  fetchWMATA(OBA_API + 'trip-details/1_' + String(tripId).trim() + '.json?key=TEST', function(res) {
+  fetchWMATA(OBA_API + 'trip-details/1_' + String(tripId).trim() + '.json?key=' + OBA_KEY, function(res) {
     var entry = res.data && res.data.entry;
     var stopTimes = entry && entry.schedule && entry.schedule.stopTimes;
     if (!stopTimes || stopTimes.length === 0) { sendUnavailableMessage(routeId, "No Trip Data"); return; }
