@@ -180,13 +180,60 @@ function streamPageData(pages, allTrains, fillOrder) {
   }
 }
 
+// WMATA's legacy Bus.svc schedule endpoints (jStopSchedule/jRouteSchedule) stopped
+// returning data after the June 2025 Better Bus redesign. Schedule data now comes
+// from the OneBusAway API behind busETA (buseta.wmata.com). OBA uses internal stop
+// IDs, so WMATA stop codes are resolved once via busETA search and cached.
+var OBA_API = 'https://buseta.wmata.com/onebusaway-api-webapp/api/where/';
+var obaIdCache = JSON.parse(localStorage.getItem('oba_stop_ids')) || {};
+
+function resolveObaStopId(code, callback) {
+  if (obaIdCache[code]) return callback(obaIdCache[code]);
+  fetchWMATA('https://buseta.wmata.com/api/search?q=' + code, function(res) {
+    var id = null;
+    var matches = (res.searchResults && res.searchResults.matches) || [];
+    for (var i = 0; i < matches.length; i++) {
+      if (String(matches[i].code) === String(code)) { id = matches[i].id; break; }
+    }
+    if (id) { obaIdCache[code] = id; localStorage.setItem('oba_stop_ids', JSON.stringify(obaIdCache)); }
+    callback(id);
+  });
+}
+
+function toLegacyTimeString(ms) {
+  var d = new Date(ms);
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' +
+         pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
 function fetchGroupSchedules(ids, offsetDays, callback) {
   var results = []; var pending = ids.length;
   if (pending === 0) return callback([]);
   ids.forEach(function(id) {
-    fetchWMATA('https://api.wmata.com/Bus.svc/json/jStopSchedule?StopID=' + id + '&Date=' + getLocalDateString(offsetDays) + '&cb=' + Date.now(), function(res) {
-      if (res && res.ScheduleArrivals) results = results.concat(res.ScheduleArrivals);
-      pending--; if (pending === 0) callback(results);
+    resolveObaStopId(id, function(obaId) {
+      if (!obaId) { pending--; if (pending === 0) callback(results); return; }
+      fetchWMATA(OBA_API + 'schedule-for-stop/' + obaId + '.json?key=TEST&date=' + getLocalDateString(offsetDays), function(res) {
+        var schedules = (res.data && res.data.entry && res.data.entry.stopRouteSchedules) || [];
+        for (var r = 0; r < schedules.length; r++) {
+          var routeId = String(schedules[r].routeId).replace(/^\d+_/, '');
+          var dirs = schedules[r].stopRouteDirectionSchedules || [];
+          for (var d = 0; d < dirs.length; d++) {
+            var times = dirs[d].scheduleStopTimes || [];
+            for (var t = 0; t < times.length; t++) {
+              // Same shape the legacy jStopSchedule ScheduleArrivals had, so
+              // processTransitData and the schedule view work unchanged.
+              results.push({
+                RouteID: routeId,
+                TripID: String(times[t].tripId).replace(/^\d+_/, ''),
+                TripDirectionText: dirs[d].tripHeadsign || '',
+                ScheduleTime: toLegacyTimeString(times[t].departureTime)
+              });
+            }
+          }
+        }
+        pending--; if (pending === 0) callback(results);
+      });
     });
   });
 }
@@ -332,63 +379,34 @@ function sendScheduleRows(preds, index) {
 }
 
 function fetchTripDetails(routeId, tripId, primaryId) {
-  var urlSchedToday = 'https://api.wmata.com/Bus.svc/json/jRouteSchedule?RouteID=' + routeId + '&Date=' + getLocalDateString(0) + '&cb=' + Date.now();
-  fetchWMATA(urlSchedToday, function(schedToday) {
-    if (findAndSendTrip(schedToday, tripId, primaryId, routeId)) return; 
-    var urlSchedTmrw = 'https://api.wmata.com/Bus.svc/json/jRouteSchedule?RouteID=' + routeId + '&Date=' + getLocalDateString(1) + '&cb=' + Date.now();
-    fetchWMATA(urlSchedTmrw, function(schedTmrw) {
-      if (!findAndSendTrip(schedTmrw, tripId, primaryId, routeId)) sendUnavailableMessage(routeId, "No Trip Data");
-    });
-  });
-}
+  fetchWMATA(OBA_API + 'trip-details/1_' + String(tripId).trim() + '.json?key=TEST', function(res) {
+    var entry = res.data && res.data.entry;
+    var stopTimes = entry && entry.schedule && entry.schedule.stopTimes;
+    if (!stopTimes || stopTimes.length === 0) { sendUnavailableMessage(routeId, "No Trip Data"); return; }
 
-function findAndSendTrip(schedObj, tripId, primaryId, routeId) {
-  var dirs = [];
-  if (schedObj.Direction0) dirs.push(schedObj.Direction0);
-  if (schedObj.Direction1) dirs.push(schedObj.Direction1);
-  var targetTrip = null; var headsign = "Trip Details"; var exactMatch = true;
-  var groupIds = currentStopIds.length > 0 ? currentStopIds : [primaryId];
-  for (var d = 0; d < dirs.length; d++) {
-    var trips = dirs[d].Trips || [];
-    for (var t = 0; t < trips.length; t++) {
-      if (String(trips[t].TripID).trim() === String(tripId).trim()) { targetTrip = trips[t]; headsign = cleanHeadsign(dirs[d].TripHeadsign || trips[t].TripDirectionText); break; }
+    var refs = res.data.references || {};
+    var stopsById = {};
+    (refs.stops || []).forEach(function(s) { stopsById[s.id] = s; });
+    var headsign = "Trip Details";
+    (refs.trips || []).forEach(function(t) { if (t.id === entry.tripId && t.tripHeadsign) headsign = cleanHeadsign(t.tripHeadsign); });
+
+    var groupIds = currentStopIds.length > 0 ? currentStopIds : [primaryId];
+    var serviceDate = entry.serviceDate || Date.now();
+    var tripStops = []; var snapIndex = 0;
+    for (var i = 0; i < stopTimes.length; i++) {
+      var stopRef = stopsById[stopTimes[i].stopId] || {};
+      if (stopRef.code && groupIds.indexOf(String(stopRef.code).trim()) !== -1) snapIndex = i;
+      // arrivalTime is seconds since midnight of the trip's service date
+      var when = new Date(serviceDate + stopTimes[i].arrivalTime * 1000);
+      var hours = when.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
+      var m = when.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
+      tripStops.push({ stopName: stopRef.name || "Stop", displayTime: hours + ":" + cleanMins + ampm });
     }
-    if (targetTrip) break;
-  }
-  if (!targetTrip) {
-    exactMatch = false; 
-    for (var d2 = 0; d2 < dirs.length; d2++) {
-      var trips2 = dirs[d2].Trips || [];
-      for (var t2 = 0; t2 < trips2.length; t2++) {
-        var st = trips2[t2].StopTimes || [];
-        for (var s = 0; s < st.length; s++) {
-          if (groupIds.indexOf(String(st[s].StopID).trim()) !== -1) { targetTrip = trips2[t2]; headsign = cleanHeadsign(dirs[d2].TripHeadsign || trips2[t2].TripDirectionText) + " (Route)"; break; }
-        }
-        if (targetTrip) break;
-      }
-      if (targetTrip) break;
-    }
-  }
-  if (!targetTrip) return false; 
-  var tripStops = []; var snapIndex = 0;
-  if (targetTrip.StopTimes) {
-    for (var i = 0; i < targetTrip.StopTimes.length; i++) {
-      var stop = targetTrip.StopTimes[i];
-      if (groupIds.indexOf(String(stop.StopID).trim()) !== -1) snapIndex = i;
-      var displayStr = "--";
-      if (exactMatch) { 
-        var schedTime = new Date(stop.Time.replace('T', ' ').replace(/-/g, '/'));
-        var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
-        var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
-        displayStr = hours + ":" + cleanMins + ampm;
-      }
-      tripStops.push({ stopName: stop.StopName, displayTime: displayStr });
-    }
-  }
-  var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 3; headerDict[KEYS.INDEX] = -1;
-  headerDict[KEYS.TITLE] = String(routeId + " • " + headsign); headerDict[KEYS.BEARING] = snapIndex;
-  Pebble.sendAppMessage(headerDict, function() { sendTripRows(tripStops, 0); });
-  return true; 
+
+    var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 3; headerDict[KEYS.INDEX] = -1;
+    headerDict[KEYS.TITLE] = String(routeId + " • " + headsign); headerDict[KEYS.BEARING] = snapIndex;
+    Pebble.sendAppMessage(headerDict, function() { sendTripRows(tripStops, 0); });
+  });
 }
 
 function sendTripRows(stops, index) {
