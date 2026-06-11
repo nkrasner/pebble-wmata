@@ -10,6 +10,7 @@ static char s_title_buffer[48];
 typedef struct { char stop_name[64]; char time[16]; } TripStop;
 static TripStop s_stops[MAX_TRIP_STOPS];
 static int s_num_stops = 0; static int s_next_index = 0;
+static bool s_centered = false;
 
 static void top_bar_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
@@ -40,6 +41,24 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
     return;
   }
   TripStop *stop = &s_stops[cell_index->row];
+  bool is_past = cell_index->row < s_next_index;
+  bool is_current = cell_index->row == s_next_index;
+
+  if (!is_highlighted && is_current) {
+    // Mark the stop we're looking at, even when the selection has moved away
+    #ifdef PBL_COLOR
+      graphics_context_set_fill_color(ctx, GColorPastelYellow);
+      graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+    #endif
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, GRect(0, 0, 3, bounds.size.h), 0, GCornerNone);
+  }
+
+  #ifdef PBL_COLOR
+    if (!is_highlighted && is_past) { main_color = GColorDarkGray; dim_color = GColorLightGray; }
+  #else
+    (void)is_past;
+  #endif
   graphics_context_set_text_color(ctx, main_color); graphics_draw_text(ctx, stop->stop_name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(4, 8, bounds.size.w - 55, 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   graphics_context_set_text_color(ctx, dim_color); graphics_draw_text(ctx, stop->time, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(bounds.size.w - 55, 8, 51, 24), GTextOverflowModeFill, GTextAlignmentRight, NULL);
 }
@@ -80,9 +99,9 @@ static void trip_window_load(Window *window) {
 }
 
 static void trip_window_unload(Window *window) {
-  if (s_status_bar) status_bar_layer_destroy(s_status_bar);
-  if (s_top_bar_layer) layer_destroy(s_top_bar_layer);
-  if (s_menu_layer) menu_layer_destroy(s_menu_layer);
+  if (s_status_bar) { status_bar_layer_destroy(s_status_bar); s_status_bar = NULL; }
+  if (s_top_bar_layer) { layer_destroy(s_top_bar_layer); s_top_bar_layer = NULL; }
+  if (s_menu_layer) { menu_layer_destroy(s_menu_layer); s_menu_layer = NULL; }
 }
 
 void trip_window_push(const char *title_text) {
@@ -104,7 +123,7 @@ void trip_window_handle_inbox(DictionaryIterator *iterator) {
   int32_t index = safe_get_int(idx_tuple);
 
   if (index == -1) {
-    s_num_stops = 0; s_next_index = 0; 
+    s_num_stops = 0; s_next_index = 0; s_centered = false;
     Tuple *next_idx_tuple = dict_find(iterator, 2); if (next_idx_tuple) s_next_index = safe_get_int(next_idx_tuple);
     if (s_menu_layer) menu_layer_reload_data(s_menu_layer);
     Tuple *title_tuple = dict_find(iterator, 5); if (title_tuple) trip_window_push(title_tuple->value->cstring);
@@ -116,7 +135,10 @@ void trip_window_handle_inbox(DictionaryIterator *iterator) {
       if (index >= s_num_stops) s_num_stops = index + 1;
       if (s_menu_layer) {
         menu_layer_reload_data(s_menu_layer);
-        if (index == s_next_index) menu_layer_set_selected_index(s_menu_layer, (MenuIndex){.section = 0, .row = s_next_index}, MenuRowAlignCenter, false);
+        if (!s_centered && index >= s_next_index) {
+          menu_layer_set_selected_index(s_menu_layer, (MenuIndex){.section = 0, .row = s_next_index}, MenuRowAlignCenter, false);
+          s_centered = true;
+        }
       }
     }
   }

@@ -10,6 +10,7 @@ static char s_title_buffer[48];
 static char s_times[MAX_SCHEDULE_TIMES][16];
 static char s_trip_ids[MAX_SCHEDULE_TIMES][24];
 static int s_num_times = 0; static int s_next_index = 0;
+static bool s_centered = false;
 
 static void top_bar_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
@@ -37,6 +38,15 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
   if (s_num_times == 0) {
     graphics_context_set_text_color(ctx, main_color); graphics_draw_text(ctx, "Loading schedule...", fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(4, 8, bounds.size.w - 8, 24), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
     return;
+  }
+  if (!is_highlighted && cell_index->row == s_next_index) {
+    // Mark the soonest upcoming time, even when the selection has moved away
+    #ifdef PBL_COLOR
+      graphics_context_set_fill_color(ctx, GColorPastelYellow);
+      graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+    #endif
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, GRect(0, 0, 3, bounds.size.h), 0, GCornerNone);
   }
   graphics_context_set_text_color(ctx, main_color); graphics_draw_text(ctx, s_times[cell_index->row], fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), GRect(0, 4, bounds.size.w, 28), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
@@ -84,9 +94,9 @@ static void schedule_window_load(Window *window) {
 }
 
 static void schedule_window_unload(Window *window) {
-  if (s_status_bar) status_bar_layer_destroy(s_status_bar);
-  if (s_top_bar_layer) layer_destroy(s_top_bar_layer);
-  if (s_menu_layer) menu_layer_destroy(s_menu_layer);
+  if (s_status_bar) { status_bar_layer_destroy(s_status_bar); s_status_bar = NULL; }
+  if (s_top_bar_layer) { layer_destroy(s_top_bar_layer); s_top_bar_layer = NULL; }
+  if (s_menu_layer) { menu_layer_destroy(s_menu_layer); s_menu_layer = NULL; }
 }
 
 void schedule_window_push(const char *title_text) {
@@ -108,7 +118,7 @@ void schedule_window_handle_inbox(DictionaryIterator *iterator) {
   int32_t index = safe_get_int(idx_tuple);
 
   if (index == -1) {
-    s_num_times = 0; s_next_index = 0; 
+    s_num_times = 0; s_next_index = 0; s_centered = false;
     Tuple *next_idx_tuple = dict_find(iterator, 2); if (next_idx_tuple) s_next_index = safe_get_int(next_idx_tuple);
     if (s_menu_layer) menu_layer_reload_data(s_menu_layer);
     Tuple *title_tuple = dict_find(iterator, 5); if (title_tuple) schedule_window_push(title_tuple->value->cstring);
@@ -120,7 +130,10 @@ void schedule_window_handle_inbox(DictionaryIterator *iterator) {
       if (index >= s_num_times) s_num_times = index + 1;
       if (s_menu_layer) {
         menu_layer_reload_data(s_menu_layer);
-        if (index == s_next_index) menu_layer_set_selected_index(s_menu_layer, (MenuIndex){.section = 0, .row = s_next_index}, MenuRowAlignCenter, false);
+        if (!s_centered && index >= s_next_index) {
+          menu_layer_set_selected_index(s_menu_layer, (MenuIndex){.section = 0, .row = s_next_index}, MenuRowAlignCenter, false);
+          s_centered = true;
+        }
       }
     }
   }

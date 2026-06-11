@@ -47,7 +47,6 @@ function shrinkName(name, maxLen) {
   for (var k = 0; k < s.length; k++) {
     if (vowels.indexOf(s[k]) !== -1) { if (k === firstV || k === lastV) finalStr += s[k]; } else { finalStr += s[k]; }
   }
-  if (finalStr.length > maxLen) return finalStr.substring(0, maxLen - 2) + "..";
   return finalStr;
 }
 
@@ -98,7 +97,7 @@ function sendAllSkeletons(pages, index, done) {
   var distStr = page.dist > 1320 ? (page.dist / 5280).toFixed(1) + " mi" : (page.dist === 99999 ? "Pinned" : Math.round(page.dist) + " ft");
   var dict = {};
   dict[KEYS.REQUEST_TYPE] = 0; dict[KEYS.INDEX] = index; dict[KEYS.TARGET_ID] = String(page.id);
-  dict[KEYS.TITLE] = String(page.name);
+  dict[KEYS.TITLE] = String(shrinkName(page.name, 10));
   dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + ".|.|.~.|.|.~.|.|.~.|.|.~.|.|.");
   Pebble.sendAppMessage(dict, function() {
     setTimeout(function() { sendAllSkeletons(pages, index + 1, done); }, 50);
@@ -127,7 +126,7 @@ function streamPageData(pages, allTrains, fillOrder) {
   function sendPage(rows) {
     var dict = {};
     dict[KEYS.REQUEST_TYPE] = 0; dict[KEYS.INDEX] = index; dict[KEYS.TARGET_ID] = String(page.id);
-    dict[KEYS.TITLE] = String(page.name);
+    dict[KEYS.TITLE] = String(shrinkName(page.name, 10));
     dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + rows.join("~"));
     Pebble.sendAppMessage(dict, function() {
       setTimeout(function() { streamPageData(pages, allTrains, remaining); }, 50);
@@ -143,7 +142,7 @@ function streamPageData(pages, allTrains, fillOrder) {
     var rows = [];
     for (var t2 = 0; t2 < sTrains.length; t2++) {
       var tr = sTrains[t2];
-      rows.push(tr.Line + "|" + shrinkName(tr.Destination, 14) + "|" + tr.Min);
+      rows.push(tr.Line + "|" + shrinkName(tr.Destination, 10) + "|" + tr.Min);
     }
     if (rows.length === 0) rows.push(" |-- NO DATA --|--");
     sendPage(rows);
@@ -160,7 +159,7 @@ function streamPageData(pages, allTrains, fillOrder) {
         for (var b = 0; b < sBuses.length; b++) {
           var bs = sBuses[b];
           var bMins = (bs.Minutes === "0" || bs.Minutes === "ARR") ? "ARR" : bs.Minutes;
-          rows.push(bs.RouteID + "|" + shrinkName(cleanHeadsign(bs.DirectionText), 14) + "|" + bMins);
+          rows.push(bs.RouteID + "|" + shrinkName(cleanHeadsign(bs.DirectionText), 10) + "|" + bMins);
         }
         sendPage(rows);
       } else {
@@ -169,7 +168,7 @@ function streamPageData(pages, allTrains, fillOrder) {
             var combined = processTransitData([], schedToday, schedTmrw, []);
             var rows = [];
             for (var c = 0; c < Math.min(combined.length, 5); c++) {
-              rows.push(combined[c].route + "|" + shrinkName(combined[c].headsign, 14) + "|" + combined[c].displayTime);
+              rows.push(combined[c].route + "|" + shrinkName(combined[c].headsign, 10) + "|" + combined[c].displayTime);
             }
             if (rows.length === 0) rows.push(" |-- NO DATA --|--");
             sendPage(rows);
@@ -335,23 +334,28 @@ function fetchRouteScheduleAtStop(primaryId, routeId) {
         for (var i = 0; i < livePreds.length; i++) {
           var lp = livePreds[i];
           if (lp.RouteID && String(lp.RouteID).trim().toUpperCase() === safeRouteId) {
-            liveTripIds[lp.TripID] = true; 
+            if (lp.TripID && liveTripIds[lp.TripID]) continue; // grouped stops can predict the same bus twice
+            liveTripIds[lp.TripID] = true;
             var mins = (lp.Minutes === "0" || lp.Minutes === "ARR") ? 0 : parseInt(lp.Minutes, 10);
-            fullList.push({ rawTime: now.getTime() + (mins * 60000), displayTime: formatTime(lp.Minutes) + " (Live)", tripId: lp.TripID || safeRouteId, dirText: lp.DirectionText });
+            var rawTime = now.getTime() + (mins * 60000);
+            fullList.push({ rawTime: rawTime, displayTime: formatClockTime(rawTime) + " (Live)", tripId: lp.TripID || safeRouteId, dirText: lp.DirectionText });
           }
         }
+        var liveTimes = fullList.map(function(e) { return e.rawTime; });
 
         var allSched = (schedToday || []).concat(schedTmrw || []);
         for (var j = 0; j < allSched.length; j++) {
           var s = allSched[j];
           if (s.RouteID && String(s.RouteID).trim().toUpperCase() === safeRouteId) {
-            if (liveTripIds[s.TripID]) continue; 
+            if (liveTripIds[s.TripID]) continue;
             var schedTime = new Date(s.ScheduleTime.replace('T', ' ').replace(/-/g, '/'));
-            var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
-            var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
+            // A scheduled time within 2 min of a live prediction is the same bus; keep the live entry
+            var nearLive = false;
+            for (var L = 0; L < liveTimes.length; L++) { if (Math.abs(liveTimes[L] - schedTime.getTime()) < 120000) { nearLive = true; break; } }
+            if (nearLive) continue;
             var isTomorrow = schedTime.getDate() !== now.getDate();
             var dirChar = s.TripDirectionText ? " " + s.TripDirectionText.charAt(0).toUpperCase() : "";
-            fullList.push({ rawTime: schedTime.getTime(), displayTime: (isTomorrow ? "Tmrw " : "") + hours + ":" + cleanMins + ampm + dirChar, tripId: s.TripID || safeRouteId });
+            fullList.push({ rawTime: schedTime.getTime(), displayTime: (isTomorrow ? "Tmrw " : "") + formatClockTime(schedTime.getTime()) + dirChar, tripId: s.TripID || safeRouteId });
           }
         }
 
@@ -361,9 +365,13 @@ function fetchRouteScheduleAtStop(primaryId, routeId) {
         var nextIndex = 0;
         for (var k = 0; k < fullList.length; k++) { if (fullList[k].rawTime >= now.getTime()) { nextIndex = k; break; } }
 
+        // Only 80 rows fit on the watch; drop all but a few past times so the
+        // upcoming ones always make it across (and centering lands correctly)
+        var start = nextIndex > 5 ? nextIndex - 5 : 0;
+        if (start > 0) { fullList = fullList.slice(start); nextIndex -= start; }
+
         var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 2; headerDict[KEYS.INDEX] = -1;
-        var shortName = currentStopName.length > 15 ? currentStopName.substring(0, 15) + "..." : currentStopName;
-        headerDict[KEYS.TITLE] = String(safeRouteId + " @ " + shortName); 
+        headerDict[KEYS.TITLE] = String(safeRouteId + " @ " + shrinkName(currentStopName, 10));
         headerDict[KEYS.BEARING] = nextIndex; 
         
         Pebble.sendAppMessage(headerDict, function() { sendScheduleRows(fullList, 0); });
@@ -389,7 +397,7 @@ function fetchTripDetails(routeId, tripId, primaryId) {
     var stopsById = {};
     (refs.stops || []).forEach(function(s) { stopsById[s.id] = s; });
     var headsign = "Trip Details";
-    (refs.trips || []).forEach(function(t) { if (t.id === entry.tripId && t.tripHeadsign) headsign = cleanHeadsign(t.tripHeadsign); });
+    (refs.trips || []).forEach(function(t) { if (t.id === entry.tripId && t.tripHeadsign) headsign = shrinkName(cleanHeadsign(t.tripHeadsign), 10); });
 
     var groupIds = currentStopIds.length > 0 ? currentStopIds : [primaryId];
     var serviceDate = entry.serviceDate || Date.now();
@@ -398,10 +406,8 @@ function fetchTripDetails(routeId, tripId, primaryId) {
       var stopRef = stopsById[stopTimes[i].stopId] || {};
       if (stopRef.code && groupIds.indexOf(String(stopRef.code).trim()) !== -1) snapIndex = i;
       // arrivalTime is seconds since midnight of the trip's service date
-      var when = new Date(serviceDate + stopTimes[i].arrivalTime * 1000);
-      var hours = when.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12;
-      var m = when.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
-      tripStops.push({ stopName: stopRef.name || "Stop", displayTime: hours + ":" + cleanMins + ampm });
+      var when = serviceDate + stopTimes[i].arrivalTime * 1000;
+      tripStops.push({ stopName: shrinkName(stopRef.name || "Stop", 10), displayTime: formatClockTime(when) });
     }
 
     var headerDict = {}; headerDict[KEYS.REQUEST_TYPE] = 3; headerDict[KEYS.INDEX] = -1;
@@ -455,10 +461,8 @@ function processTransitData(livePreds, schedToday, schedTmrw, supportedRoutes) {
         var diffMs = schedTime - now; var diffMins = Math.floor(diffMs / 60000); var displayStr = "";
         
         if (diffMins > 120) {
-          var hours = schedTime.getHours(); var ampm = hours >= 12 ? 'p' : 'a'; hours = hours % 12; hours = hours ? hours : 12; 
-          var m = schedTime.getMinutes(); var cleanMins = m < 10 ? '0' + m : m;
           var isTomorrow = schedTime.getDate() !== now.getDate();
-          displayStr = (isTomorrow ? "Tmrw " : "") + hours + ":" + cleanMins + ampm;
+          displayStr = (isTomorrow ? "Tmrw " : "") + formatClockTime(schedTime.getTime());
         } else { displayStr = diffMins + "m (Sch)"; }
         combined.push({ route: sch.RouteID, headsign: headsignSched, minutes: diffMins, displayTime: displayStr, tripId: sch.TripID || sch.RouteID });
       }
@@ -469,4 +473,5 @@ function processTransitData(livePreds, schedToday, schedTmrw, supportedRoutes) {
 
 function cleanHeadsign(text) { if (!text) return "Unknown"; var idx = text.toLowerCase().indexOf(" to "); return idx !== -1 ? text.substring(idx + 4) : text; }
 function formatTime(mins) { return (mins === "0" || mins === "ARR") ? "ARR" : mins + " min"; }
+function formatClockTime(ms) { var d = new Date(ms); var h = d.getHours(); var ap = h >= 12 ? 'p' : 'a'; h = h % 12; h = h ? h : 12; var m = d.getMinutes(); return h + ":" + (m < 10 ? '0' : '') + m + ap; }
 function calculateDistance(lat1, lon1, lat2, lon2) { var R = 20925640; var dLat = (lat2 - lat1) * Math.PI / 180; var dLon = (lon2 - lon1) * Math.PI / 180; var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2); var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); return R * c; }
