@@ -136,16 +136,9 @@ static void render_transit_page(Layer *layer, GContext *ctx, TransitPage *p) {
       graphics_context_set_stroke_color(ctx, GColorWhite);
       graphics_context_set_stroke_width(ctx, 1);
       graphics_draw_round_rect(ctx, GRect(5, y_offset + 1, 30, 20), 3);
-      graphics_context_set_text_color(ctx, GColorBlack);
-      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(3, y_offset,     32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(5, y_offset,     31, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(3, y_offset + 2, 32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-      graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(5, y_offset + 2, 31, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-      graphics_context_set_text_color(ctx, GColorWhite);
-    #else
-      graphics_context_set_text_color(ctx, GColorBlack);
     #endif
 
+    graphics_context_set_text_color(ctx, GColorBlack);
     graphics_draw_text(ctx, row->route, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD), GRect(4, y_offset + 1, 32, 20), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
     graphics_context_set_text_color(ctx, GColorBlack);
@@ -321,7 +314,9 @@ static int32_t safe_get_int(Tuple *t) {
   return 0; 
 }
 
-static char s_raw_data_buffer[512]; 
+static char s_raw_data_buffer[512];
+static TransitPage s_parse_buffer;
+static bool s_refreshing = false; // true while a background refresh streams in over live data
 
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
   Tuple *type_t = dict_find(iterator, 0); if (!type_t) return;
@@ -333,12 +328,28 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   int index = safe_get_int(idx_t);
 
   if (index == -1) {
-    s_num_pages = 0; 
     Tuple *bear_t = dict_find(iterator, 2);
     if (bear_t) {
       s_first_nearby_idx = safe_get_int(bear_t);
       if (s_first_nearby_idx >= MAX_PAGES) s_first_nearby_idx = MAX_PAGES - 1;
       if (s_first_nearby_idx < 0) s_first_nearby_idx = 0;
+    }
+    if (s_num_pages > 0) {
+      // Background refresh: keep showing current data and swap pages in as they arrive.
+      s_refreshing = true;
+      Tuple *count_t = dict_find(iterator, 3);
+      if (count_t) {
+        int new_count = safe_get_int(count_t);
+        if (new_count > MAX_PAGES) new_count = MAX_PAGES;
+        if (new_count > 0 && new_count < s_num_pages) {
+          s_num_pages = new_count;
+          if (s_current_page >= s_num_pages) s_current_page = s_num_pages - 1;
+          layer_mark_dirty(s_page_layer);
+        }
+      }
+    } else {
+      // Initial load (or post-pin-action reload): nothing on screen yet.
+      s_refreshing = false;
     }
     return;
   }
@@ -346,7 +357,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   if (index >= 0 && index < MAX_PAGES) {
     Tuple *id_t = dict_find(iterator, 1); Tuple *title_t = dict_find(iterator, 5); Tuple *sub_t = dict_find(iterator, 6);
     if (id_t && title_t && sub_t && sub_t->type == TUPLE_CSTRING && title_t->type == TUPLE_CSTRING) {
-      TransitPage *p = &s_pages[index];
+      TransitPage *p = &s_parse_buffer;
       snprintf(p->stop_id, sizeof(p->stop_id), "%s", id_t->value->cstring);
       snprintf(p->name, sizeof(p->name), "%s", title_t->value->cstring);
       snprintf(s_raw_data_buffer, sizeof(s_raw_data_buffer), "%s", sub_t->value->cstring);
@@ -380,11 +391,25 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         row_str = next_row;
       }
       
+      TransitPage *live = &s_pages[index];
+      bool is_skeleton = (p->num_rows > 0 && p->rows[0].route[0] == '.');
+      bool has_live_rows = (index < s_num_pages && strcmp(live->stop_id, p->stop_id) == 0 &&
+                            live->num_rows > 0 && live->rows[0].route[0] != '.');
+      if (is_skeleton && has_live_rows) {
+        // Refresh skeleton for a stop we're already showing: update the header, keep the old rows.
+        snprintf(live->name, sizeof(live->name), "%s", p->name);
+        snprintf(live->dist, sizeof(live->dist), "%s", p->dist);
+        live->is_pinned = p->is_pinned;
+        live->is_rail = p->is_rail;
+      } else {
+        *live = *p;
+      }
+
       if (index >= s_num_pages) s_num_pages = index + 1;
-      
-      if (s_num_pages - 1 == s_first_nearby_idx) {
+
+      if (!s_refreshing && s_num_pages - 1 == s_first_nearby_idx) {
         s_current_page = s_first_nearby_idx; layer_mark_dirty(s_page_layer);
-      } else if (index == s_num_pages - 1) {
+      } else if (index == s_current_page || index == s_num_pages - 1) {
         layer_mark_dirty(s_page_layer);
       }
     }

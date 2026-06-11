@@ -259,6 +259,7 @@ function fetchAllPages() {
           }
 
           var payload = {}; payload[KEYS.REQUEST_TYPE] = 0; payload[KEYS.INDEX] = -1; payload[KEYS.BEARING] = pinnedStops.length;
+          payload[KEYS.DISTANCE] = Math.min(currentPages.length, 10);
           Pebble.sendAppMessage(payload, function() {
             sendAllSkeletons(currentPages, 0, function() {
               streamPageData(currentPages, trainRes.Trains || [], buildFillOrder(currentPages));
