@@ -3,7 +3,7 @@
 #include "trip_window.h"
 
 #define MAX_PAGES 10
-#define MAX_ROWS 5
+#define MAX_ROWS 7
 
 typedef struct {
   char route[8];
@@ -112,11 +112,14 @@ static void render_transit_page(Layer *layer, GContext *ctx, TransitPage *p) {
   }
 
   graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(ctx, p->name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(32, 22, bounds.size.w - 36, 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  GRect name_box = GRect(32, 22, bounds.size.w - 36, 44);
+  GSize name_size = graphics_text_layout_get_content_size(p->name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), name_box, GTextOverflowModeWordWrap, GTextAlignmentLeft);
+  graphics_draw_text(ctx, p->name, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), name_box, GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
 
-  // 3. Rows
-  int y_offset = 50;
+  // 3. Rows (header may have wrapped to a second line; skip rows that don't fit)
+  int y_offset = 22 + (name_size.h > 24 ? name_size.h : 24) + 4;
   for (int i = 0; i < p->num_rows; i++) {
+    if (y_offset + 20 > bounds.size.h) break;
     TransitRow *row = &p->rows[i];
 
     if (row->route[0] == '.') {
@@ -311,7 +314,7 @@ static int32_t safe_get_int(Tuple *t) {
   return 0; 
 }
 
-static char s_raw_data_buffer[512];
+static char s_raw_data_buffer[768]; // 7 rows of unshortened names need headroom
 static TransitPage s_parse_buffer;
 static bool s_refreshing = false; // true while a background refresh streams in over live data
 

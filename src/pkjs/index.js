@@ -90,7 +90,7 @@ function sendAllSkeletons(pages, index, done) {
   var dict = {};
   dict[KEYS.REQUEST_TYPE] = 0; dict[KEYS.INDEX] = index; dict[KEYS.TARGET_ID] = String(page.id);
   dict[KEYS.TITLE] = String(shrinkName(page.name, 10));
-  dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + ".|.|.~.|.|.~.|.|.~.|.|.~.|.|.");
+  dict[KEYS.SUBTITLE] = String(distStr + "^" + (page.isPinned ? "1" : "0") + "^" + page.type + "^" + ".|.|.~.|.|.~.|.|.~.|.|.~.|.|.~.|.|.~.|.|.");
   Pebble.sendAppMessage(dict, function() {
     setTimeout(function() { sendAllSkeletons(pages, index + 1, done); }, 50);
   });
@@ -130,7 +130,7 @@ function streamPageData(pages, allTrains, fillOrder) {
     for (var t = 0; t < allTrains.length; t++) {
       if (page.stopIds.indexOf(allTrains[t].LocationCode) !== -1) sTrains.push(allTrains[t]);
     }
-    sTrains = sTrains.slice(0, 5);
+    sTrains = sTrains.slice(0, 7);
     var rows = [];
     for (var t2 = 0; t2 < sTrains.length; t2++) {
       var tr = sTrains[t2];
@@ -147,7 +147,7 @@ function streamPageData(pages, allTrains, fillOrder) {
           return aMin - bMin;
         });
         var rows = [];
-        var sBuses = preds.slice(0, 5);
+        var sBuses = preds.slice(0, 7);
         for (var b = 0; b < sBuses.length; b++) {
           var bs = sBuses[b];
           var bMins = (bs.Minutes === "0" || bs.Minutes === "ARR") ? "ARR" : bs.Minutes;
@@ -159,7 +159,7 @@ function streamPageData(pages, allTrains, fillOrder) {
           fetchGroupSchedules(page.stopIds, 1, function(schedTmrw) {
             var combined = processTransitData([], schedToday, schedTmrw, []);
             var rows = [];
-            for (var c = 0; c < Math.min(combined.length, 5); c++) {
+            for (var c = 0; c < Math.min(combined.length, 7); c++) {
               rows.push(combined[c].route + "|" + shrinkName(combined[c].headsign, 10) + "|" + combined[c].displayTime);
             }
             if (rows.length === 0) rows.push(" |-- NO DATA --|--");
