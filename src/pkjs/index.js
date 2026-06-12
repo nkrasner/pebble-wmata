@@ -36,18 +36,10 @@ Pebble.addEventListener('appmessage', function(e) {
   else if (reqType === 6) movePin(targetId, 1);  
 });
 
+// Shortening disabled (bigger screen); the watch's trailing ellipsis handles
+// overflow. The old vowel-stripping algorithm lives in git history if needed.
 function shrinkName(name, maxLen) {
-  if (!name || name.length <= maxLen) return name;
-  var s = "";
-  for (var i = 0; i < name.length; i++) { if (i === 0 || name[i].toLowerCase() !== name[i-1].toLowerCase()) s += name[i]; }
-  if (s.length <= maxLen) return s;
-  var vowels = "aeiouAEIOU"; var firstV = -1, lastV = -1;
-  for (var j = 0; j < s.length; j++) { if (vowels.indexOf(s[j]) !== -1) { if (firstV === -1) firstV = j; lastV = j; } }
-  var finalStr = "";
-  for (var k = 0; k < s.length; k++) {
-    if (vowels.indexOf(s[k]) !== -1) { if (k === firstV || k === lastV) finalStr += s[k]; } else { finalStr += s[k]; }
-  }
-  return finalStr;
+  return name;
 }
 
 function togglePin(id) {
